@@ -55,7 +55,7 @@ func (wm *WebMention) GetTargetEndpoint(target *url.URL) (*url.URL, error) {
 
 	parser := microformats.New()
 
-	mf2data := parser.Parse(resp.Body)
+	mf2data := parser.Parse(resp.Body, target)
 
 	resp.Body.Close()
 
@@ -119,7 +119,7 @@ func (wm *WebMention) process() {
 	found := searchLinks(body, mention.target)
 	if found {
 		p := microformats.New()
-		data := p.ParseNode(body)
+		data := p.ParseNode(body, mention.source)
 		wm.Mention(mention.source, mention.target, data)
 	}
 }
