@@ -3,13 +3,13 @@ package webmention
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/andyleap/microformats"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )
@@ -105,14 +105,14 @@ func (wm *WebMention) process() {
 
 	resp, err := http.Get(mention.source.String())
 	if err != nil {
-		log.Printf("Error getting source %s: %s", mention.source, err)
+		log.Errorf("Error getting source %s: %s", mention.source, err)
 		return
 	}
 
 	body, err := html.Parse(resp.Body)
 	resp.Body.Close()
 	if err != nil {
-		log.Printf("Error parsing source %s: %s", mention.source, err)
+		log.Errorf("Error parsing source %s: %s", mention.source, err)
 		return
 	}
 
@@ -121,6 +121,16 @@ func (wm *WebMention) process() {
 		p := microformats.New()
 		data := p.ParseNode(body, mention.source)
 		wm.Mention(mention.source, mention.target, data)
+		return
+	} else {
+		log.Warnf("no links found on document %s", mention.source.String())
+	}
+
+	links := GetHeaderLinks(resp.Header.Values("Link"))
+	if len(links) > 0 {
+		wm.Mention(mention.source, mention.target, nil)
+	} else {
+		log.Warnf("no links found in headers %s", mention.source.String())
 	}
 }
 
