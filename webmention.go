@@ -16,7 +16,7 @@ import (
 type WebMention struct {
 	mentionQueue chan *mention
 	timer        *time.Timer
-	Mention      func(source, target *url.URL, sourceData *microformats.Data)
+	Mention      func(source, target *url.URL, sourceData *microformats.Data) error
 }
 
 func New() *WebMention {
@@ -120,18 +120,21 @@ func (wm *WebMention) process() {
 	if found {
 		p := microformats.New()
 		data := p.ParseNode(body, mention.source)
-		wm.Mention(mention.source, mention.target, data)
+		if err := wm.Mention(mention.source, mention.target, data); err != nil {
+			log.WithError(err).Error("error processing webmention")
+		}
 		return
-	} else {
-		log.Warnf("no links found on document %s", mention.source.String())
 	}
 
 	links := GetHeaderLinks(resp.Header.Values("Link"))
 	if len(links) > 0 {
-		wm.Mention(mention.source, mention.target, nil)
-	} else {
-		log.Warnf("no links found in headers %s", mention.source.String())
+		if err := wm.Mention(mention.source, mention.target, nil); err != nil {
+			log.WithError(err).Error("error processing webmention")
+		}
+		return
 	}
+
+	log.Warnf("no links found on %s", mention.source.String())
 }
 
 func searchLinks(node *html.Node, link *url.URL) bool {
