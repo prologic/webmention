@@ -2,7 +2,6 @@
 package webmention
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -62,7 +61,7 @@ func (wm *WebMention) GetTargetEndpoint(target *url.URL) (*url.URL, error) {
 	for _, link := range mf2data.Rels["webmention"] {
 		wmurl, err := url.Parse(link)
 		if err != nil {
-			fmt.Println(err)
+			log.WithError(err).Warn("error parsing webmention link")
 			continue
 		}
 		return wmurl, nil
@@ -74,10 +73,11 @@ func (wm *WebMention) GetTargetEndpoint(target *url.URL) (*url.URL, error) {
 func (wm *WebMention) SendNotification(target *url.URL, source *url.URL) {
 	endpoint, err := wm.GetTargetEndpoint(target)
 	if err != nil {
-		fmt.Println(err)
+		log.WithError(err).Error("error retrieving webmention endpoint")
 		return
 	}
 	if endpoint == nil {
+		log.Warn("no webmention endpoint found")
 		return
 	}
 	values := make(url.Values)
