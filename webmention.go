@@ -38,12 +38,14 @@ type mention struct {
 }
 
 func (wm *WebMention) GetTargetEndpoint(target *url.URL) (*url.URL, error) {
-	resp, err := http.Get(target.String())
+	res, err := http.Get(target.String())
 	if err != nil {
+		log.WithError(err).Error("error getting target endpoint")
 		return nil, err
 	}
+	defer res.Body.Close()
 
-	links := GetHeaderLinks(resp.Header["Link"])
+	links := GetHeaderLinks(res.Header["Link"])
 	for _, link := range links {
 		for _, rel := range link.Params["rel"] {
 			if rel == "webmention" || rel == "http://webmention.org" {
@@ -53,10 +55,7 @@ func (wm *WebMention) GetTargetEndpoint(target *url.URL) (*url.URL, error) {
 	}
 
 	parser := microformats.New()
-
-	mf2data := parser.Parse(resp.Body, target)
-
-	resp.Body.Close()
+	mf2data := parser.Parse(res.Body, target)
 
 	for _, link := range mf2data.Rels["webmention"] {
 		wmurl, err := url.Parse(link)
@@ -83,12 +82,19 @@ func (wm *WebMention) SendNotification(target *url.URL, source *url.URL) {
 	values := make(url.Values)
 	values.Set("source", source.String())
 	values.Set("target", target.String())
-	http.PostForm(endpoint.String(), values)
+	if res, err := http.PostForm(endpoint.String(), values); err != nil || (res.StatusCode%100 != 2) {
+		log.WithError(err).Errorf(
+			"error sending webmention source=%s target=%s status=%s",
+			source.String(), target.String(), res.Status,
+		)
+		return
+	}
+	log.Infof("successfully sent webmention source=%s target=%s", source.String(), target.String())
 }
 
-func (wm *WebMention) WebMentionEndpoint(rw http.ResponseWriter, req *http.Request) {
-	source := req.FormValue("source")
-	target := req.FormValue("target")
+func (wm *WebMention) WebMentionEndpoint(w http.ResponseWriter, r *http.Request) {
+	source := r.FormValue("source")
+	target := r.FormValue("target")
 	if source != "" && target != "" {
 		sourceurl, _ := url.Parse(source)
 		targeturl, _ := url.Parse(target)
@@ -96,21 +102,25 @@ func (wm *WebMention) WebMentionEndpoint(rw http.ResponseWriter, req *http.Reque
 			sourceurl,
 			targeturl,
 		}
+		log.Infof("webmention source=%s target=%s enqueued for processing", source, target)
+		w.WriteHeader(http.StatusAccepted)
+	} else {
+		log.Warn("invalid webmention recieved")
+		http.Error(w, "Bad Request", http.StatusBadRequest)
 	}
-	rw.WriteHeader(http.StatusAccepted)
 }
 
 func (wm *WebMention) process() {
 	mention := <-wm.mentionQueue
 
-	resp, err := http.Get(mention.source.String())
+	res, err := http.Get(mention.source.String())
 	if err != nil {
 		log.Errorf("Error getting source %s: %s", mention.source, err)
 		return
 	}
+	defer res.Body.Close()
 
-	body, err := html.Parse(resp.Body)
-	resp.Body.Close()
+	body, err := html.Parse(res.Body)
 	if err != nil {
 		log.Errorf("Error parsing source %s: %s", mention.source, err)
 		return
@@ -122,14 +132,18 @@ func (wm *WebMention) process() {
 		data := p.ParseNode(body, mention.source)
 		if err := wm.Mention(mention.source, mention.target, data); err != nil {
 			log.WithError(err).Error("error processing webmention")
+		} else {
+			log.Infof("processed webmention with mf2 source=%s target=%s", mention.source, mention.target)
 		}
 		return
 	}
 
-	links := GetHeaderLinks(resp.Header.Values("Link"))
+	links := GetHeaderLinks(res.Header.Values("Link"))
 	if len(links) > 0 {
 		if err := wm.Mention(mention.source, mention.target, nil); err != nil {
 			log.WithError(err).Error("error processing webmention")
+		} else {
+			log.Infof("processed webmention without mf2 source=%s target=%s", mention.source, mention.target)
 		}
 		return
 	}
