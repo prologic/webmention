@@ -69,15 +69,15 @@ func (wm *WebMention) GetTargetEndpoint(target *url.URL) (*url.URL, error) {
 	return nil, nil
 }
 
-func (wm *WebMention) SendNotification(target *url.URL, source *url.URL) {
+func (wm *WebMention) SendNotification(target *url.URL, source *url.URL) error {
 	endpoint, err := wm.GetTargetEndpoint(target)
 	if err != nil {
 		log.WithError(err).Error("error retrieving webmention endpoint")
-		return
+		return err
 	}
 	if endpoint == nil {
 		log.Warn("no webmention endpoint found")
-		return
+		return nil
 	}
 	values := make(url.Values)
 	values.Set("source", source.String())
@@ -87,9 +87,10 @@ func (wm *WebMention) SendNotification(target *url.URL, source *url.URL) {
 			"error sending webmention source=%s target=%s status=%s",
 			source.String(), target.String(), res.Status,
 		)
-		return
+		return err
 	}
 	log.Infof("successfully sent webmention source=%s target=%s", source.String(), target.String())
+	return nil
 }
 
 func (wm *WebMention) WebMentionEndpoint(w http.ResponseWriter, r *http.Request) {
