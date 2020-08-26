@@ -14,19 +14,28 @@ import (
 )
 
 type WebMention struct {
-	mentionQueue chan *mention
-	timer        *time.Timer
-	Mention      func(source, target *url.URL, sourceData *microformats.Data) error
+	inbox       chan *mention
+	outbox      chan *mention
+	inboxTimer  *time.Timer
+	outboxTimer *time.Timer
+	Mention     func(source, target *url.URL, sourceData *microformats.Data) error
 }
 
 func New() *WebMention {
 	wm := &WebMention{
-		mentionQueue: make(chan *mention, 100),
+		inbox:  make(chan *mention, 100),
+		outbox: make(chan *mention, 100),
 	}
-	wm.timer = time.NewTimer(5 * time.Second)
+	wm.inboxTimer = time.NewTimer(5 * time.Second)
+	wm.outboxTimer = time.NewTimer(5 * time.Second)
 	go func() {
-		for _ = range wm.timer.C {
-			wm.process()
+		for _ = range wm.inboxTimer.C {
+			wm.processInbox()
+		}
+	}()
+	go func() {
+		for _ = range wm.outboxTimer.C {
+			wm.processOutbox()
 		}
 	}()
 	return wm
@@ -69,28 +78,8 @@ func (wm *WebMention) GetTargetEndpoint(target *url.URL) (*url.URL, error) {
 	return nil, nil
 }
 
-func (wm *WebMention) SendNotification(target *url.URL, source *url.URL) error {
-	endpoint, err := wm.GetTargetEndpoint(target)
-	if err != nil {
-		log.WithError(err).Error("error retrieving webmention endpoint")
-		return err
-	}
-	if endpoint == nil {
-		log.Warn("no webmention endpoint found")
-		return nil
-	}
-	values := make(url.Values)
-	values.Set("source", source.String())
-	values.Set("target", target.String())
-	if res, err := http.PostForm(endpoint.String(), values); err != nil || (res.StatusCode%100 != 2) {
-		log.WithError(err).Errorf(
-			"error sending webmention source=%s target=%s status=%s",
-			source.String(), target.String(), res.Status,
-		)
-		return err
-	}
-	log.Infof("successfully sent webmention source=%s target=%s", source.String(), target.String())
-	return nil
+func (wm *WebMention) SendNotification(target *url.URL, source *url.URL) {
+	wm.outbox <- &mention{source, target}
 }
 
 func (wm *WebMention) WebMentionEndpoint(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +88,7 @@ func (wm *WebMention) WebMentionEndpoint(w http.ResponseWriter, r *http.Request)
 	if source != "" && target != "" {
 		sourceurl, _ := url.Parse(source)
 		targeturl, _ := url.Parse(target)
-		wm.mentionQueue <- &mention{
+		wm.inbox <- &mention{
 			sourceurl,
 			targeturl,
 		}
@@ -111,8 +100,8 @@ func (wm *WebMention) WebMentionEndpoint(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-func (wm *WebMention) process() {
-	mention := <-wm.mentionQueue
+func (wm *WebMention) processInbox() {
+	mention := <-wm.inbox
 
 	res, err := http.Get(mention.source.String())
 	if err != nil {
@@ -150,6 +139,35 @@ func (wm *WebMention) process() {
 	}
 
 	log.Warnf("no links found on %s", mention.source.String())
+}
+
+func (wm *WebMention) processOutbox() {
+	mention := <-wm.outbox
+
+	endpoint, err := wm.GetTargetEndpoint(mention.target)
+	if err != nil {
+		log.WithError(err).Error("error retrieving webmention endpoint")
+		return
+	}
+	if endpoint == nil {
+		log.Warn("no webmention endpoint found")
+		return
+	}
+	values := make(url.Values)
+	values.Set("source", mention.source.String())
+	values.Set("target", mention.target.String())
+	if res, err := http.PostForm(endpoint.String(), values); err != nil || (res.StatusCode%100 != 2) {
+		log.WithError(err).Errorf(
+			"error sending webmention source=%s target=%s status=%s",
+			mention.source.String(), mention.target.String(), res.Status,
+		)
+		return
+	}
+	log.Infof(
+		"successfully sent webmention source=%s target=%s",
+		mention.source.String(), mention.target.String(),
+	)
+	return
 }
 
 func searchLinks(node *html.Node, link *url.URL) bool {
