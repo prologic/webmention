@@ -104,8 +104,8 @@ func (wm *WebMention) processInbox() {
 	mention := <-wm.inbox
 
 	res, err := http.Get(mention.source.String())
-	if err != nil {
-		log.Errorf("Error getting source %s: %s", mention.source, err)
+	if err != nil || res.StatusCode/100 != 2 {
+		log.Errorf("Error getting source %s (%s): %s", mention.source, res.Status, err)
 		return
 	}
 	defer res.Body.Close()
@@ -176,6 +176,11 @@ func searchLinks(node *html.Node, link *url.URL) bool {
 			if href := getAttr(node, "href"); href != "" {
 				target, err := url.Parse(href)
 				if err == nil {
+					// prologic/twtxt pods have the form
+					// http://pod.domain.tld/external?nick=NICK&url=URL
+					if strings.HasPrefix(target.Path, "/external") && target.Query().Get("url") == link.String() {
+						return true
+					}
 					if target.String() == link.String() {
 						return true
 					}
