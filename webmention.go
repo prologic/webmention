@@ -164,8 +164,8 @@ func (wm *WebMention) processOutbox() {
 		return
 	}
 	log.Infof(
-		"successfully sent webmention source=%s target=%s",
-		mention.source.String(), mention.target.String(),
+		"successfully sent webmention to %s (source=%s target=%s)",
+		endpoint.String(), mention.source.String(), mention.target.String(),
 	)
 	return
 }
